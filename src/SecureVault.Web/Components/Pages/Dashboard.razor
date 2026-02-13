@@ -1,0 +1,140 @@
+@page "/dashboard"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SecureVault.Web.Data
+@using SecureVault.Web.Data.Models
+@inject AppDbContext DbContext
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IFileStorageService StorageService
+@inject IAuditService AuditService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard - SecureVault</PageTitle>
+
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>My Encrypted Files</h2>
+        <a href="encrypt" class="btn btn-primary">Encrypt New File</a>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success") alert-dismissible">
+            @_statusMessage
+            <button type="button" class="btn-close" @onclick="() => _statusMessage = null"></button>
+        </div>
+    }
+
+    @if (_files == null)
+    {
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    }
+    else if (!_files.Any())
+    {
+        <div class="text-center py-5 text-muted">
+            <h4>No encrypted files yet</h4>
+            <p>Upload and encrypt your first file to get started.</p>
+            <a href="encrypt" class="btn btn-outline-primary">Encrypt a File</a>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>File Name</th>
+                        <th>Size</th>
+                        <th>Algorithm</th>
+                        <th>Encrypted On</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var file in _files)
+                    {
+                        <tr>
+                            <td>@file.OriginalFileName</td>
+                            <td>@FormatSize(file.OriginalFileSize)</td>
+                            <td><span class="badge bg-secondary">@file.Algorithm</span></td>
+                            <td>@file.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                <a href="decrypt/@file.Id" class="btn btn-sm btn-outline-primary me-1">Decrypt</a>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteFile(file)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <p class="text-muted small">@_files.Count file(s) total</p>
+    }
+</div>
+
+@code {
+    private List<EncryptedFile>? _files;
+    private string? _statusMessage;
+    private bool _isError;
+    private string? _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.GetUserAsync(authState.User);
+        if (user == null) return;
+        _userId = user.Id;
+
+        await LoadFiles();
+    }
+
+    private async Task LoadFiles()
+    {
+        if (_userId == null) return;
+        _files = await DbContext.EncryptedFiles
+            .Where(f => f.UserId == _userId)
+            .OrderByDescending(f => f.CreatedAt)
+            .ToListAsync();
+    }
+
+    private async Task DeleteFile(EncryptedFile file)
+    {
+        try
+        {
+            await StorageService.DeleteAsync(file.S3Key);
+            DbContext.EncryptedFiles.Remove(file);
+            await DbContext.SaveChangesAsync();
+
+            await AuditService.LogAsync(_userId!, AuditAction.Delete, file.Id, null, $"Deleted {file.OriginalFileName}");
+
+            _statusMessage = $"File '{file.OriginalFileName}' deleted.";
+            _isError = false;
+            await LoadFiles();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error deleting file: {ex.Message}";
+            _isError = true;
+        }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

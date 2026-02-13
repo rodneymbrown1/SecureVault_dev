@@ -1,0 +1,100 @@
+@page "/audit-log"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Identity
+@using SecureVault.Web.Data.Models
+@inject IAuditService AuditService
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode InteractiveServer
+
+<PageTitle>Audit Log - SecureVault</PageTitle>
+
+<div class="container">
+    <h2 class="mb-4">Audit Log</h2>
+    <p class="text-muted">History of all encryption and decryption operations on your account.</p>
+
+    @if (_logs == null)
+    {
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status"></div>
+        </div>
+    }
+    else if (!_logs.Any())
+    {
+        <div class="text-center py-5 text-muted">
+            <h4>No activity yet</h4>
+            <p>Operations will appear here after you encrypt or decrypt files.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Time</th>
+                        <th>Action</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in _logs)
+                    {
+                        <tr>
+                            <td>@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td>
+                                <span class="badge @GetBadgeClass(log.Action)">@log.Action</span>
+                            </td>
+                            <td>@log.Details</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_hasMore)
+        {
+            <div class="text-center">
+                <button class="btn btn-outline-secondary" @onclick="LoadMore">Load More</button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<AuditLogEntry>? _logs;
+    private bool _hasMore;
+    private int _skip;
+    private const int PageSize = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.GetUserAsync(authState.User);
+        if (user == null) return;
+
+        _logs = await AuditService.GetUserLogsAsync(user.Id, 0, PageSize);
+        _hasMore = _logs.Count == PageSize;
+        _skip = _logs.Count;
+    }
+
+    private async Task LoadMore()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.GetUserAsync(authState.User);
+        if (user == null) return;
+
+        var moreLogs = await AuditService.GetUserLogsAsync(user.Id, _skip, PageSize);
+        _logs?.AddRange(moreLogs);
+        _hasMore = moreLogs.Count == PageSize;
+        _skip += moreLogs.Count;
+    }
+
+    private static string GetBadgeClass(AuditAction action) => action switch
+    {
+        AuditAction.Encrypt => "bg-success",
+        AuditAction.Decrypt => "bg-primary",
+        AuditAction.Delete => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

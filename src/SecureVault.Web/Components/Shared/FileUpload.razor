@@ -1,0 +1,73 @@
+<div class="mb-3">
+    <label class="form-label fw-bold">@Label</label>
+    <div class="border rounded p-4 text-center @(_isDragOver ? "border-primary bg-light" : "border-secondary")"
+         @ondragenter="HandleDragEnter"
+         @ondragleave="HandleDragLeave"
+         @ondragover:preventDefault>
+
+        <InputFile OnChange="HandleFileSelected"
+                   accept="@Accept"
+                   class="form-control"
+                   id="fileUpload" />
+
+        <p class="text-muted mt-2 mb-0">
+            @if (SelectedFile != null)
+            {
+                <span>Selected: <strong>@SelectedFile.Name</strong> (@FormatSize(SelectedFile.Size))</span>
+            }
+            else
+            {
+                <span>Choose a file or drag and drop here (max @FormatSize(MaxFileSize))</span>
+            }
+        </p>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="text-danger small mt-1">@_error</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "Select File";
+    [Parameter] public string? Accept { get; set; }
+    [Parameter] public long MaxFileSize { get; set; } = 100 * 1024 * 1024; // 100MB
+    [Parameter] public IBrowserFile? SelectedFile { get; set; }
+    [Parameter] public EventCallback<IBrowserFile?> SelectedFileChanged { get; set; }
+
+    private bool _isDragOver;
+    private string? _error;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        var file = e.File;
+
+        if (file.Size > MaxFileSize)
+        {
+            _error = $"File exceeds maximum size of {FormatSize(MaxFileSize)}.";
+            SelectedFile = null;
+            await SelectedFileChanged.InvokeAsync(null);
+            return;
+        }
+
+        SelectedFile = file;
+        await SelectedFileChanged.InvokeAsync(file);
+    }
+
+    private void HandleDragEnter() => _isDragOver = true;
+    private void HandleDragLeave() => _isDragOver = false;
+
+    private static string FormatSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

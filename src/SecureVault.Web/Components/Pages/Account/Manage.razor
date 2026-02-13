@@ -1,0 +1,110 @@
+@page "/account/manage"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Identity
+@using SecureVault.Web.Data.Models
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Account - SecureVault</PageTitle>
+
+<div class="container">
+    <h2>Account Settings</h2>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+    }
+
+    @if (_user != null)
+    {
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Profile</h5>
+                <p><strong>Email:</strong> @_user.Email</p>
+                <p><strong>Account Created:</strong> @_user.CreatedAt.ToString("MMMM dd, yyyy")</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Change Password</h5>
+
+                <EditForm Model="_passwordModel" OnValidSubmit="HandleChangePassword" FormName="changePassword">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="text-danger" />
+
+                    <div class="mb-3">
+                        <label for="currentPassword" class="form-label">Current Password</label>
+                        <InputText id="currentPassword" @bind-Value="_passwordModel.CurrentPassword" type="password" class="form-control" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="newPassword" class="form-label">New Password</label>
+                        <InputText id="newPassword" @bind-Value="_passwordModel.NewPassword" type="password" class="form-control" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="confirmNewPassword" class="form-label">Confirm New Password</label>
+                        <InputText id="confirmNewPassword" @bind-Value="_passwordModel.ConfirmNewPassword" type="password" class="form-control" />
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Update Password</button>
+                </EditForm>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private ApplicationUser? _user;
+    private string? _statusMessage;
+    private bool _isError;
+
+    [SupplyParameterFromForm]
+    private ChangePasswordModel _passwordModel { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _user = await UserManager.GetUserAsync(authState.User);
+    }
+
+    private async Task HandleChangePassword()
+    {
+        if (_user == null) return;
+
+        if (_passwordModel.NewPassword != _passwordModel.ConfirmNewPassword)
+        {
+            _statusMessage = "New passwords do not match.";
+            _isError = true;
+            return;
+        }
+
+        var result = await UserManager.ChangePasswordAsync(_user, _passwordModel.CurrentPassword, _passwordModel.NewPassword);
+        if (result.Succeeded)
+        {
+            _statusMessage = "Password changed successfully.";
+            _isError = false;
+            _passwordModel = new();
+        }
+        else
+        {
+            _statusMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+            _isError = true;
+        }
+    }
+
+    private class ChangePasswordModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string CurrentPassword { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 8)]
+        public string NewPassword { get; set; } = "";
+
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.Compare(nameof(NewPassword))]
+        public string ConfirmNewPassword { get; set; } = "";
+    }
+}

@@ -1,0 +1,49 @@
+@using SecureVault.Web.Data.Models
+
+<div class="mb-3">
+    <label class="form-label fw-bold">Encryption Algorithm</label>
+    <div class="row g-2">
+        @foreach (var algo in Enum.GetValues<EncryptionAlgorithm>())
+        {
+            <div class="col-auto">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="algorithm"
+                           id="algo-@algo" value="@algo"
+                           checked="@(SelectedAlgorithm == algo)"
+                           @onchange="() => OnAlgorithmChanged(algo)" />
+                    <label class="form-check-label" for="algo-@algo">
+                        @GetDisplayName(algo)
+                    </label>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (SelectedAlgorithm == EncryptionAlgorithm.DES)
+    {
+        <div class="alert alert-warning mt-2 py-1 px-2 small">
+            DES is considered insecure for modern use. Consider AES-256 for better security.
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public EncryptionAlgorithm SelectedAlgorithm { get; set; } = EncryptionAlgorithm.AES;
+    [Parameter] public EventCallback<EncryptionAlgorithm> SelectedAlgorithmChanged { get; set; }
+
+    private async Task OnAlgorithmChanged(EncryptionAlgorithm algo)
+    {
+        SelectedAlgorithm = algo;
+        await SelectedAlgorithmChanged.InvokeAsync(algo);
+    }
+
+    private static string GetDisplayName(EncryptionAlgorithm algo) => algo switch
+    {
+        EncryptionAlgorithm.AES => "AES-256-GCM (Recommended)",
+        EncryptionAlgorithm.DES => "DES (Legacy)",
+        EncryptionAlgorithm.TripleDES => "TripleDES",
+        EncryptionAlgorithm.RSA => "RSA-2048 (Hybrid)",
+        EncryptionAlgorithm.ECC => "ECC/ECDH (Hybrid)",
+        _ => algo.ToString()
+    };
+}

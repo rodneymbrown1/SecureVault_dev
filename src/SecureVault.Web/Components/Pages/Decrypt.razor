@@ -1,0 +1,183 @@
+@page "/decrypt/{FileId:guid?}"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SecureVault.Web.Data
+@using SecureVault.Web.Data.Models
+@using SecureVault.Web.Services
+@using SecureVault.Web.Services.Encryption
+@inject EncryptionServiceFactory EncryptionFactory
+@inject IFileStorageService StorageService
+@inject IKeyManagementService KeyManagement
+@inject IAuditService AuditService
+@inject AppDbContext DbContext
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Decrypt File - SecureVault</PageTitle>
+
+<div class="container">
+    <h2 class="mb-4">Decrypt a File</h2>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+    }
+
+    @if (_files == null)
+    {
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status"></div>
+        </div>
+    }
+    else if (!_files.Any())
+    {
+        <div class="text-center py-5 text-muted">
+            <h4>No encrypted files to decrypt</h4>
+            <a href="encrypt" class="btn btn-outline-primary">Encrypt a File First</a>
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Select File to Decrypt</label>
+                    <select class="form-select" @onchange="HandleFileSelection">
+                        <option value="">-- Select a file --</option>
+                        @foreach (var file in _files)
+                        {
+                            <option value="@file.Id" selected="@(_selectedFile?.Id == file.Id)">
+                                @file.OriginalFileName (@file.Algorithm, @file.CreatedAt.ToString("yyyy-MM-dd"))
+                            </option>
+                        }
+                    </select>
+                </div>
+
+                @if (_selectedFile != null)
+                {
+                    <div class="mb-3 p-3 bg-light rounded">
+                        <p class="mb-1"><strong>File:</strong> @_selectedFile.OriginalFileName</p>
+                        <p class="mb-1"><strong>Algorithm:</strong> @_selectedFile.Algorithm</p>
+                        <p class="mb-0"><strong>Encrypted:</strong> @_selectedFile.CreatedAt.ToString("yyyy-MM-dd HH:mm")</p>
+                    </div>
+                }
+
+                <ProgressIndicator IsVisible="_isProcessing" Message="@_progressMessage" />
+
+                <button class="btn btn-primary btn-lg"
+                        disabled="@(_selectedFile == null || _isProcessing)"
+                        @onclick="HandleDecrypt">
+                    @if (_isProcessing)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    }
+                    Decrypt and Download
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? FileId { get; set; }
+
+    private List<EncryptedFile>? _files;
+    private EncryptedFile? _selectedFile;
+    private bool _isProcessing;
+    private string _progressMessage = "Decrypting...";
+    private string? _statusMessage;
+    private bool _isError;
+    private string? _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = await UserManager.GetUserAsync(authState.User);
+        if (user == null) return;
+        _userId = user.Id;
+
+        _files = await DbContext.EncryptedFiles
+            .Where(f => f.UserId == _userId)
+            .OrderByDescending(f => f.CreatedAt)
+            .ToListAsync();
+
+        if (FileId.HasValue)
+        {
+            _selectedFile = _files.FirstOrDefault(f => f.Id == FileId.Value);
+        }
+    }
+
+    private void HandleFileSelection(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var fileId))
+        {
+            _selectedFile = _files?.FirstOrDefault(f => f.Id == fileId);
+        }
+        else
+        {
+            _selectedFile = null;
+        }
+    }
+
+    private async Task HandleDecrypt()
+    {
+        if (_selectedFile == null || _userId == null) return;
+
+        _isProcessing = true;
+        _statusMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // Download encrypted file from S3
+            _progressMessage = "Downloading encrypted file...";
+            StateHasChanged();
+
+            using var encryptedStream = await StorageService.DownloadAsync(_selectedFile.S3Key);
+
+            // Retrieve encryption key
+            _progressMessage = "Retrieving encryption key...";
+            StateHasChanged();
+
+            var (key, iv) = await KeyManagement.RetrieveKeyAsync(_selectedFile.KeyRecordId, _userId);
+
+            // Decrypt
+            _progressMessage = $"Decrypting with {_selectedFile.Algorithm}...";
+            StateHasChanged();
+
+            var encryptionService = EncryptionFactory.GetService(_selectedFile.Algorithm);
+            var result = await encryptionService.DecryptAsync(encryptedStream, key, iv);
+
+            // Update last accessed
+            _selectedFile.LastAccessedAt = DateTime.UtcNow;
+            await DbContext.SaveChangesAsync();
+
+            // Audit log
+            await AuditService.LogAsync(_userId, AuditAction.Decrypt, _selectedFile.Id, null,
+                $"Decrypted {_selectedFile.OriginalFileName}");
+
+            // Trigger browser download via JS interop
+            _progressMessage = "Preparing download...";
+            StateHasChanged();
+
+            var base64 = Convert.ToBase64String(result.DecryptedData);
+            var contentType = _selectedFile.ContentType ?? "application/octet-stream";
+            await JS.InvokeVoidAsync("downloadFile", _selectedFile.OriginalFileName, contentType, base64);
+
+            _statusMessage = $"File '{_selectedFile.OriginalFileName}' decrypted successfully.";
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Decryption failed: {ex.Message}";
+            _isError = true;
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+}

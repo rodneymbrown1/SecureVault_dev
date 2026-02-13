@@ -1,0 +1,52 @@
+@page "/"
+
+<PageTitle>SecureVault - Secure File Encryption</PageTitle>
+
+<div class="container">
+    <div class="text-center py-5">
+        <h1 class="display-4">SecureVault</h1>
+        <p class="lead text-muted">Secure file encryption with multiple algorithms. Upload, encrypt, and manage your files with confidence.</p>
+
+        <AuthorizeView>
+            <Authorized>
+                <div class="mt-4">
+                    <a href="dashboard" class="btn btn-primary btn-lg me-2">Go to Dashboard</a>
+                    <a href="encrypt" class="btn btn-outline-primary btn-lg">Encrypt a File</a>
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <div class="mt-4">
+                    <a href="account/register" class="btn btn-primary btn-lg me-2">Get Started</a>
+                    <a href="account/login" class="btn btn-outline-primary btn-lg">Sign In</a>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+    </div>
+
+    <div class="row mt-5">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h5 class="card-title">Multiple Algorithms</h5>
+                    <p class="card-text">Choose from AES-256-GCM, DES, TripleDES, RSA, or ECC encryption to suit your security needs.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h5 class="card-title">Cloud Storage</h5>
+                    <p class="card-text">Encrypted files are securely stored in the cloud with S3. Access them from anywhere.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <h5 class="card-title">Full Audit Trail</h5>
+                    <p class="card-text">Every encryption and decryption operation is logged for complete accountability.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

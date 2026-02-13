@@ -1,0 +1,135 @@
+@page "/encrypt"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Identity
+@using SecureVault.Web.Data
+@using SecureVault.Web.Data.Models
+@using SecureVault.Web.Services
+@using SecureVault.Web.Services.Encryption
+@inject EncryptionServiceFactory EncryptionFactory
+@inject IFileStorageService StorageService
+@inject IKeyManagementService KeyManagement
+@inject IAuditService AuditService
+@inject AppDbContext DbContext
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Encrypt File - SecureVault</PageTitle>
+
+<div class="container">
+    <h2 class="mb-4">Encrypt a File</h2>
+
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_statusMessage</div>
+    }
+
+    <div class="card">
+        <div class="card-body">
+            <FileUpload @bind-SelectedFile="_selectedFile" Label="Choose file to encrypt" />
+
+            <AlgorithmSelector @bind-SelectedAlgorithm="_selectedAlgorithm" />
+
+            <ProgressIndicator IsVisible="_isProcessing" Message="@_progressMessage" />
+
+            <button class="btn btn-primary btn-lg"
+                    disabled="@(_selectedFile == null || _isProcessing)"
+                    @onclick="HandleEncrypt">
+                @if (_isProcessing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                Encrypt File
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private IBrowserFile? _selectedFile;
+    private EncryptionAlgorithm _selectedAlgorithm = EncryptionAlgorithm.AES;
+    private bool _isProcessing;
+    private string _progressMessage = "Encrypting...";
+    private string? _statusMessage;
+    private bool _isError;
+
+    private async Task HandleEncrypt()
+    {
+        if (_selectedFile == null) return;
+
+        _isProcessing = true;
+        _statusMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = await UserManager.GetUserAsync(authState.User);
+            if (user == null) throw new InvalidOperationException("User not found.");
+
+            // Read the file
+            _progressMessage = "Reading file...";
+            StateHasChanged();
+
+            using var fileStream = _selectedFile.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024);
+            using var memStream = new MemoryStream();
+            await fileStream.CopyToAsync(memStream);
+            memStream.Position = 0;
+
+            // Encrypt
+            _progressMessage = $"Encrypting with {_selectedAlgorithm}...";
+            StateHasChanged();
+
+            var encryptionService = EncryptionFactory.GetService(_selectedAlgorithm);
+            var result = await encryptionService.EncryptAsync(memStream);
+
+            // Store encryption key
+            _progressMessage = "Storing encryption key...";
+            StateHasChanged();
+
+            var keyRecord = await KeyManagement.StoreKeyAsync(
+                user.Id, _selectedAlgorithm, result.Key, result.IV, result.KeySize);
+
+            // Upload to S3
+            _progressMessage = "Uploading encrypted file...";
+            StateHasChanged();
+
+            var s3Key = $"{user.Id}/{Guid.NewGuid()}/{_selectedFile.Name}.encrypted";
+            using var encryptedStream = new MemoryStream(result.EncryptedData);
+            await StorageService.UploadAsync(s3Key, encryptedStream);
+
+            // Save file metadata
+            var encryptedFile = new EncryptedFile
+            {
+                UserId = user.Id,
+                OriginalFileName = _selectedFile.Name,
+                OriginalFileSize = _selectedFile.Size,
+                ContentType = _selectedFile.ContentType,
+                Algorithm = _selectedAlgorithm,
+                S3Key = s3Key,
+                KeyRecordId = keyRecord.Id
+            };
+
+            DbContext.EncryptedFiles.Add(encryptedFile);
+            await DbContext.SaveChangesAsync();
+
+            // Audit log
+            await AuditService.LogAsync(user.Id, AuditAction.Encrypt, encryptedFile.Id, null,
+                $"Encrypted {_selectedFile.Name} with {_selectedAlgorithm}");
+
+            _statusMessage = $"File '{_selectedFile.Name}' encrypted successfully with {_selectedAlgorithm}.";
+            _isError = false;
+            _selectedFile = null;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Encryption failed: {ex.Message}";
+            _isError = true;
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+}

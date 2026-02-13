@@ -1,0 +1,35 @@
+@if (IsVisible)
+{
+    <div class="my-3">
+        <div class="d-flex align-items-center mb-1">
+            <strong class="me-2">@Message</strong>
+            @if (IsIndeterminate)
+            {
+                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            }
+        </div>
+
+        @if (!IsIndeterminate)
+        {
+            <div class="progress" style="height: 20px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                     role="progressbar"
+                     style="width: @Progress%"
+                     aria-valuenow="@Progress"
+                     aria-valuemin="0"
+                     aria-valuemax="100">
+                    @Progress%
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public string Message { get; set; } = "Processing...";
+    [Parameter] public int Progress { get; set; }
+    [Parameter] public bool IsIndeterminate { get; set; } = true;
+}
